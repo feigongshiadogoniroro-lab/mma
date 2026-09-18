@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MMA団体運営</title>
+<meta name="theme-color" content="#0f1115">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="MMA団体運営">
+<link rel="apple-touch-icon">
+<link rel="icon" type="image/png">
+<style>
+  :root{ --bg:#0f1115; --panel:#181b22; --panel2:#20242e; --border:#2c313d;
+         --text:#e8eaed; --sub:#9aa4b2; --accent:#e0433c; --accent2:#3c9ee0; }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--bg); color:var(--text); padding:20px;
+       font-family:"Hiragino Sans","Yu Gothic",-apple-system,sans-serif; max-width:520px; margin:0 auto;}
+  .panel{background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:18px; margin-top:16px;}
+  h1{font-size:20px; margin:16px 0 4px;}
+  .sub{color:var(--sub); font-size:13px; line-height:1.7;}
+  button{background:var(--accent); color:#fff; border:none; border-radius:10px;
+         padding:13px 18px; font-size:15px; font-weight:700; cursor:pointer; width:100%;}
+  button.sec{background:var(--panel2); color:var(--text); border:1px solid var(--border); font-size:13px; padding:10px 14px;}
+  .step{font-size:13px; line-height:1.9; color:var(--sub); margin-top:10px;}
+  .err{color:var(--accent); font-size:13px; line-height:1.7; margin-top:10px;}
+  .ok{color:#3cc26a;}
+</style>
+</head>
+<body>
+<div id="boot" style="display:none;">
+  <h1>🥊 MMA団体運営</h1>
+  <div class="sub">ゲーム本体がまだ入っていません。</div>
+
+  <div class="panel">
+    <div style="font-weight:700; font-size:15px; margin-bottom:6px;">ゲームのファイルを読み込む</div>
+    <div class="step">
+      1. Claudeからもらった <b>mma_game.html</b> を、iPhoneの「ファイル」アプリに保存します<br>
+      2. 下のボタンを押して、そのファイルを選びます<br>
+      3. すぐにゲームが始まります
+    </div>
+    <div style="margin-top:14px;">
+      <button onclick="document.getElementById('pick').click()">📂 ゲームのファイルを選ぶ</button>
+    </div>
+    <input type="file" id="pick" accept=".html,.htm,.txt,text/html,text/plain" style="display:none" onchange="installFrom(this)">
+    <div id="msg" class="err"></div>
+  </div>
+
+  <div class="panel">
+    <div style="font-size:13px; color:var(--sub); line-height:1.8;">
+      一度読み込めば、次からはこの画面は出ません。<br>
+      新しい版が出たときは、ゲームの<b>セーブ画面</b>から同じように選ぶだけで入れ替えられます。
+      もうアップロードの作業は要りません。
+    </div>
+  </div>
+</div>
+
+<div id="loading" class="sub" style="padding:40px 0; text-align:center;">読み込んでいます…</div>
+
+<script>
+// アイコンをその場で描く(ホーム画面に置いたときの見た目)
+(function(){
+  try{
+    var c = document.createElement('canvas'); c.width = c.height = 180;
+    var g = c.getContext('2d'), S = 180, cx = 90, cy = 90, r = S*0.22;
+    g.beginPath();
+    g.moveTo(r,0); g.lineTo(S-r,0); g.quadraticCurveTo(S,0,S,r);
+    g.lineTo(S,S-r); g.quadraticCurveTo(S,S,S-r,S);
+    g.lineTo(r,S); g.quadraticCurveTo(0,S,0,S-r);
+    g.lineTo(0,r); g.quadraticCurveTo(0,0,r,0); g.closePath();
+    g.fillStyle = '#0f1115'; g.fill();
+    function oct(rad){ g.beginPath();
+      for(var i=0;i<8;i++){ var a = Math.PI/8 + i*Math.PI/4;
+        var x = cx + rad*Math.cos(a), y = cy + rad*Math.sin(a);
+        if(i===0) g.moveTo(x,y); else g.lineTo(x,y); }
+      g.closePath(); g.stroke(); }
+    g.lineJoin='round';
+    g.strokeStyle='#e0433c'; g.lineWidth=S*0.045; oct(S*0.34);
+    g.strokeStyle='#3c9ee0'; g.lineWidth=S*0.028; oct(S*0.215);
+    g.beginPath(); g.ellipse(cx,cy,S*0.105,S*0.078,0,0,Math.PI*2); g.fillStyle='#e0433c'; g.fill();
+    g.beginPath(); g.ellipse(cx,cy,S*0.066,S*0.046,0,0,Math.PI*2); g.fillStyle='#e8eaed'; g.fill();
+    var url = c.toDataURL('image/png');
+    var ls = document.querySelectorAll('link[rel="apple-touch-icon"], link[rel="icon"]');
+    for(var i=0;i<ls.length;i++) ls[i].href = url;
+  }catch(e){}
+})();
+
+// ===== ゲーム本体の置き場所 =====
+// 本体はこの端末の中(IndexedDB)に保存する。
+// 置き場所のファイルを入れ替えなくても、アプリの中から新しくできる。
+var DB_NAME = 'dfk_app', STORE = 'code', KEY = 'html';
+
+function openDb(){
+  return new Promise(function(resolve, reject){
+    try{
+      var req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = function(){
+        var db = req.result;
+        if(!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+      };
+      req.onsuccess = function(){ resolve(req.result); };
+      req.onerror = function(){ reject(req.error); };
+    }catch(e){ reject(e); }
+  });
+}
+function dbGet(){
+  return openDb().then(function(db){
+    return new Promise(function(resolve, reject){
+      var tx = db.transaction(STORE, 'readonly');
+      var r = tx.objectStore(STORE).get(KEY);
+      r.onsuccess = function(){ resolve(r.result || null); };
+      r.onerror = function(){ reject(r.error); };
+    });
+  });
+}
+function dbPut(v){
+  return openDb().then(function(db){
+    return new Promise(function(resolve, reject){
+      var tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).put(v, KEY);
+      tx.oncomplete = function(){ resolve(true); };
+      tx.onerror = function(){ reject(tx.error); };
+    });
+  });
+}
+// IndexedDB が使えない端末向けの逃げ道
+function lsGet(){ try{ return localStorage.getItem('dfk_app_html'); }catch(e){ return null; } }
+function lsPut(v){ try{ localStorage.setItem('dfk_app_html', v); return true; }catch(e){ return false; } }
+
+function showBoot(message){
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('boot').style.display = 'block';
+  if(message) document.getElementById('msg').innerHTML = message;
+}
+
+function looksLikeGame(t){
+  return t && t.length > 5000 && t.indexOf('<html') >= 0
+      && (t.indexOf('MMA団体運営シミュレーター') >= 0 || t.indexOf('APP_VERSION') >= 0);
+}
+
+function installFrom(input){
+  var file = input && input.files && input.files[0];
+  input.value = '';
+  if(!file) return;
+  var msg = document.getElementById('msg');
+  msg.className = 'err';
+  msg.textContent = '読み込んでいます…';
+  var reader = new FileReader();
+  reader.onload = function(){
+    var text = String(reader.result || '');
+    if(!looksLikeGame(text)){
+      msg.className = 'err';
+      msg.textContent = 'このファイルはゲーム本体ではないようです。Claudeからもらった mma_game.html を選んでください。';
+      return;
+    }
+    dbPut(text).then(function(){ done(); }).catch(function(){
+      if(lsPut(text)) done();
+      else {
+        msg.className = 'err';
+        msg.textContent = '保存できませんでした。端末の空き容量を確認してください。';
+      }
+    });
+    function done(){
+      msg.className = 'err ok';
+      msg.textContent = '読み込めました。始めます…';
+      try{ localStorage.setItem('dfk_loader', '1'); }catch(e){}
+      setTimeout(function(){ location.reload(); }, 400);
+    }
+  };
+  reader.onerror = function(){
+    msg.className = 'err';
+    msg.textContent = 'ファイルを読めませんでした。もう一度お試しください。';
+  };
+  reader.readAsText(file);
+}
+
+function boot(html){
+  try{ localStorage.setItem('dfk_loader', '1'); }catch(e){}
+  document.open();
+  document.write(html);
+  document.close();
+}
+
+dbGet().then(function(html){
+  if(html) { boot(html); return; }
+  var alt = lsGet();
+  if(alt) { boot(alt); return; }
+  showBoot('');
+}).catch(function(){
+  var alt = lsGet();
+  if(alt) boot(alt);
+  else showBoot('');
+});
+</script>
+</body>
+</html>
